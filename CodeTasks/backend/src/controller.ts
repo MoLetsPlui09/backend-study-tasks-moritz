@@ -31,8 +31,9 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Expose-Headers': 'Content-Disposition',
   });
   res.end(JSON.stringify(data));
 }
@@ -43,9 +44,10 @@ export function createController(): http.RequestListener {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       });
+
       res.end();
       return;
     }
@@ -105,17 +107,48 @@ export function createController(): http.RequestListener {
       return;
     }
 
-    // GET /documents?fin=<FIN>
     if (method === 'GET' && url.startsWith('/documents') && !url.startsWith('/documents/download')) {
-      // TODO Story 2: Implement document listing
-      sendJson(res, 501, { error: 'Not implemented' });
+      const requestUrl = new URL(url, `http://${req.headers.host}`);
+      const fin = requestUrl.searchParams.get('fin');
+
+      if (!fin) {
+        sendJson(res, 400, { error: 'Missing fin parameter' });
+        return;
+      }
+
+      const documents = listDocumentsByFin(fin);
+
+      sendJson(res, 200, documents);
       return;
     }
 
     // GET /documents/download?fin=<FIN>
     if (method === 'GET' && url.startsWith('/documents/download')) {
-      // TODO Story 2: Implement PDF download
-      sendJson(res, 501, { error: 'Not implemented' });
+      const requestUrl = new URL(url, `http://${req.headers.host}`);
+      const fin = requestUrl.searchParams.get('fin');
+
+      if (!fin) {
+        sendJson(res, 400, { error: 'Missing fin parameter' });
+        return;
+      }
+
+      const pdfPath = getAppraisalReportPath(fin);
+
+      if (!pdfPath || !fs.existsSync(pdfPath)) {
+        sendJson(res, 404, { error: 'Appraisal report not found' });
+        return;
+      }
+
+      const filename = pdfPath.split(/[\\/]/).pop()!;
+
+      res.writeHead(200, {
+        'Content-Type': 'application/pdf',
+        'Access-Control-Allow-Origin': '*',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': fs.statSync(pdfPath).size,
+      });
+
+      fs.createReadStream(pdfPath).pipe(res);
       return;
     }
 
